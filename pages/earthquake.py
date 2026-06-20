@@ -14,7 +14,7 @@ st.title("🌍 Global Earthquake Dashboard")
 st.caption("USGS Earthquake Data Visualization")
 
 # =========================
-# Sidebar Filters
+# Sidebar
 # =========================
 st.sidebar.header("Filters")
 
@@ -31,23 +31,9 @@ min_mag = st.sidebar.slider(
     step=0.1
 )
 
-region_filter = st.sidebar.selectbox(
-    "Region",
-    [
-        "Global",
-        "Asia",
-        "North America",
-        "South America",
-        "Europe",
-        "Africa",
-        "Oceania",
-        "Pacific Ring of Fire"
-    ]
-)
-
 
 # =========================
-# Data Loader
+# Load Data
 # =========================
 @st.cache_data(show_spinner=False)
 def load_data(year, min_mag):
@@ -84,47 +70,8 @@ def load_data(year, min_mag):
     return pd.DataFrame(rows)
 
 
-# =========================
-# Region Filter Logic
-# =========================
-REGIONS = {
-    "Asia": {"lat": (5, 55), "lon": (60, 150)},
-    "North America": {"lat": (10, 75), "lon": (-170, -50)},
-    "South America": {"lat": (-60, 15), "lon": (-90, -30)},
-    "Europe": {"lat": (35, 70), "lon": (-10, 40)},
-    "Africa": {"lat": (-35, 38), "lon": (-20, 55)},
-    "Oceania": {"lat": (-50, 0), "lon": (110, 180)},
-    "Pacific Ring of Fire": {"lat": (-60, 60), "lon": (-180, 180)},
-}
-
-def filter_region(df, region):
-    if region == "Global":
-        return df
-
-    if region == "Pacific Ring of Fire":
-        return df[
-            (
-                ((df["lon"] >= 120) & (df["lon"] <= 180)) |
-                ((df["lon"] >= -180) & (df["lon"] <= -70))
-            )
-        ]
-
-    bounds = REGIONS[region]
-    return df[
-        (df["lat"] >= bounds["lat"][0]) &
-        (df["lat"] <= bounds["lat"][1]) &
-        (df["lon"] >= bounds["lon"][0]) &
-        (df["lon"] <= bounds["lon"][1])
-    ]
-
-
-# =========================
-# Load Data
-# =========================
 with st.spinner("Loading earthquake data..."):
     df = load_data(year, min_mag)
-
-df = filter_region(df, region_filter)
 
 if df.empty:
     st.warning("No data found.")
@@ -141,7 +88,7 @@ def extract_region(place):
         return place.split(",")[-1].strip()
     return "Unknown"
 
-df["region_name"] = df["place"].apply(extract_region)
+df["region"] = df["place"].apply(extract_region)
 
 def mag_color(m):
     if m >= 7:
@@ -163,13 +110,13 @@ col1, col2, col3, col4 = st.columns(4)
 col1.metric("🌎 Total", f"{len(df):,}")
 col2.metric("⚡ Max Mag", round(df["mag"].max(), 2))
 col3.metric("📈 Avg Mag", round(df["mag"].mean(), 2))
-col4.metric("🌍 Regions", df["region_name"].nunique())
+col4.metric("🌍 Regions", df["region"].nunique())
 
 
 # =========================
 # Map
 # =========================
-st.subheader(f"🗺 Earthquake Map - {region_filter}")
+st.subheader("🗺 Global Earthquake Map")
 
 layer = pdk.Layer(
     "ScatterplotLayer",
@@ -178,16 +125,13 @@ layer = pdk.Layer(
     get_fill_color='color',
     get_radius='mag * 15000',
     pickable=True,
-    opacity=0.55
+    opacity=0.5
 )
 
-center_lat = df["lat"].mean()
-center_lon = df["lon"].mean()
-
 view_state = pdk.ViewState(
-    latitude=center_lat,
-    longitude=center_lon,
-    zoom=2 if region_filter != "Global" else 1
+    latitude=0,
+    longitude=0,
+    zoom=1
 )
 
 deck = pdk.Deck(
@@ -219,10 +163,11 @@ with right:
 
 
 # =========================
-# Top Regions
+# Region Stats
 # =========================
 st.subheader("🌎 Top 10 Most Active Regions")
-region_stats = df.groupby("region_name").size().sort_values(ascending=False).head(10)
+
+region_stats = df.groupby("region").size().sort_values(ascending=False).head(10)
 st.bar_chart(region_stats)
 
 
