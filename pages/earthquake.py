@@ -1,113 +1,137 @@
-
 import streamlit as st
+import random
 import pandas as pd
-import requests
-import pydeck as pdk
-import plotly.express as px
-from datetime import datetime
 
-st.set_page_config(page_title="Earthquake Education Dashboard", layout="wide")
-st.title("🌍 Earthquake Education Dashboard")
-st.caption("USGS Earthquake Data + Scientific Insights")
+st.set_page_config(page_title="추천 알고리즘 버블 체험", layout="wide")
 
-REGIONS = {
-    "Global": None,
-    "Asia": {"lat": (5, 55), "lon": (60, 150)},
-    "North America": {"lat": (10, 75), "lon": (-170, -50)},
-    "South America": {"lat": (-60, 15), "lon": (-90, -30)},
-    "Europe": {"lat": (35, 70), "lon": (-10, 40)},
-    "Africa": {"lat": (-35, 38), "lon": (-20, 55)},
-    "Oceania": {"lat": (-50, 0), "lon": (110, 180)}
-}
+# -------------------------
+# 콘텐츠 데이터
+# -------------------------
+content_pool = [
+    {"title": "⚽ 손흥민 멀티골!", "category": "스포츠"},
+    {"title": "🏀 NBA 플레이오프 대이변", "category": "스포츠"},
+    
+    {"title": "🗳️ 대선 후보 토론 화제", "category": "정치"},
+    {"title": "📢 정책 논쟁 격화", "category": "정치"},
+    
+    {"title": "🎮 신작 게임 출시", "category": "게임"},
+    {"title": "🔥 프로게이머 역대급 플레이", "category": "게임"},
+    
+    {"title": "🎤 아이돌 컴백", "category": "연예"},
+    {"title": "🎬 넷플릭스 신작 화제", "category": "연예"},
+    
+    {"title": "😱 충격! 믿기 힘든 사건", "category": "자극"},
+    {"title": "🚨 지금 안 보면 손해", "category": "자극"},
+    
+    {"title": "📚 AI가 바꾸는 미래", "category": "교육"},
+    {"title": "🧠 뇌는 어떻게 학습할까?", "category": "교육"},
+]
 
-@st.cache_data
-def load_data(year, min_mag):
-    start = f"{year}-01-01"
-    end = f"{year}-12-31"
-    url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start}&endtime={end}&minmagnitude={min_mag}&limit=5000"
-    r = requests.get(url, timeout=30)
-    data = r.json()
-    rows = []
-    for f in data.get("features", []):
-        p = f["properties"]
-        c = f["geometry"]["coordinates"]
-        rows.append({
-            "place": p["place"],
-            "mag": p["mag"],
-            "time": pd.to_datetime(p["time"], unit="ms"),
-            "lon": c[0],
-            "lat": c[1],
-            "depth": c[2]
-        })
-    return pd.DataFrame(rows)
+categories = ["스포츠", "정치", "게임", "연예", "자극", "교육"]
 
-def filter_region(df, region):
-    if region == "Global":
-        return df
-    b = REGIONS[region]
-    return df[(df.lat>=b["lat"][0])&(df.lat<=b["lat"][1])&(df.lon>=b["lon"][0])&(df.lon<=b["lon"][1])]
+# -------------------------
+# 세션 상태
+# -------------------------
+if "weights" not in st.session_state:
+    st.session_state.weights = {cat: 1 for cat in categories}
 
-year = st.sidebar.selectbox("Year", list(range(2000, datetime.now().year+1))[::-1])
-min_mag = st.sidebar.slider("Min Magnitude", 4.0, 9.0, 4.5, 0.1)
-region = st.sidebar.selectbox("Region", list(REGIONS.keys()))
+if "click_history" not in st.session_state:
+    st.session_state.click_history = []
 
-df = load_data(year, min_mag)
-if df.empty:
-    st.warning("No data")
-    st.stop()
+# -------------------------
+# 추천 알고리즘
+# -------------------------
+def get_feed():
+    weighted_pool = []
+    
+    for item in content_pool:
+        weight = st.session_state.weights[item["category"]]
+        weighted_pool.extend([item] * weight)
+    
+    return random.sample(weighted_pool, min(6, len(weighted_pool)))
 
-df = filter_region(df, region)
-if df.empty:
-    st.warning("No data after filter")
-    st.stop()
+def click_content(item):
+    cat = item["category"]
+    st.session_state.click_history.append(cat)
+    st.session_state.weights[cat] += 3
 
-df["month"] = df["time"].dt.month
-
-c1,c2,c3 = st.columns(3)
-c1.metric("Earthquakes", len(df))
-c2.metric("Max Magnitude", round(df.mag.max(),2))
-c3.metric("Avg Magnitude", round(df.mag.mean(),2))
-
-st.subheader("🗺 Map")
-layer = pdk.Layer("ScatterplotLayer", data=df, get_position='[lon, lat]', get_radius='mag*12000', get_fill_color='[255,80,0,140]')
-st.pydeck_chart(pdk.Deck(layers=[layer], initial_view_state=pdk.ViewState(latitude=float(df.lat.mean()), longitude=float(df.lon.mean()), zoom=1.5)))
-
-col1,col2 = st.columns(2)
-with col1:
-    monthly = df.groupby("month").size().reset_index(name="count")
-    fig = px.line(monthly, x="month", y="count", title="Monthly Trend")
-    st.plotly_chart(fig, use_container_width=True)
-
-with col2:
-    fig = px.histogram(df, x="mag", nbins=20, title="Magnitude Distribution")
-    st.plotly_chart(fig, use_container_width=True)
-
-st.subheader("🧠 Educational Insights")
+# -------------------------
+# UI
+# -------------------------
+st.title("📱 추천 알고리즘 버블 체험")
 st.markdown("""
-### Plate Tectonics
-Most earthquakes occur near tectonic plate boundaries.
-
-### Depth Analysis
-- Shallow: 0–70 km  
-- Intermediate: 70–300 km  
-- Deep: 300+ km
+당신은 SNS 사용자입니다.  
+관심 있는 콘텐츠를 클릭해보세요.  
+AI가 당신의 취향을 학습합니다.
 """)
 
-depth_bins = pd.cut(df["depth"], bins=[0,70,300,1000], labels=["Shallow","Intermediate","Deep"])
-depth_df = depth_bins.value_counts().reset_index()
-depth_df.columns=["depth_type","count"]
-fig = px.bar(depth_df, x="depth_type", y="count", title="Depth Analysis")
-st.plotly_chart(fig, use_container_width=True)
+st.divider()
 
-st.markdown("""
-### Magnitude vs Energy Release
-Each +1 magnitude ≈ 32x more energy.
-- M5 = 1x
-- M6 = 32x
-- M7 = 1,000x
-- M8 = 32,000x
+feed = get_feed()
+
+st.subheader("추천 피드")
+
+cols = st.columns(2)
+
+for i, item in enumerate(feed):
+    with cols[i % 2]:
+        st.markdown(f"### {item['title']}")
+        st.caption(f"카테고리: {item['category']}")
+        if st.button("보기", key=f"content_{i}"):
+            click_content(item)
+            st.rerun()
+
+st.divider()
+
+st.subheader("추천 알고리즘 분석")
+
+df = pd.DataFrame({
+    "카테고리": list(st.session_state.weights.keys()),
+    "추천 강도": list(st.session_state.weights.values())
+})
+
+st.bar_chart(df.set_index("카테고리"))
+
+if len(st.session_state.click_history) >= 3:
+    dominant = max(st.session_state.weights, key=st.session_state.weights.get)
+
+    st.subheader("AI 분석 결과")
+    st.warning(f"""
+현재 알고리즘은 **{dominant}** 콘텐츠를 가장 선호한다고 판단했습니다.
+
+당신의 피드는 점점 이 콘텐츠 중심으로 바뀌고 있습니다.
 """)
 
-energy = pd.DataFrame({"Magnitude":["5","6","7","8"],"Energy":[1,32,1000,32000]})
-fig = px.bar(energy, x="Magnitude", y="Energy", title="Energy Release")
-st.plotly_chart(fig, use_container_width=True)
+    st.error("""
+### 필터 버블 발생
+이제 AI는 당신이 좋아하는 콘텐츠만 보여주기 시작합니다.
+
+문제점:
+- 다양한 관점을 보기 어려움
+- 기존 생각이 강화됨
+- 편향이 커질 수 있음
+""")
+
+st.divider()
+
+st.subheader("교육 포인트")
+
+st.markdown("""
+### 필터 버블 (Filter Bubble)
+사용자가 좋아할 만한 정보만 제공
+
+### 확증 편향 (Confirmation Bias)
+자신의 기존 생각을 강화
+
+### 추천 알고리즘 윤리
+AI는 체류 시간을 늘리는 방향으로 최적화됨
+
+### 생각해보기
+TikTok / YouTube 추천 알고리즘은  
+당신에게 어떤 영향을 주고 있을까요?
+""")
+
+if st.button("초기화"):
+    st.session_state.weights = {cat: 1 for cat in categories}
+    st.session_state.click_history = []
+    st.rerun()
