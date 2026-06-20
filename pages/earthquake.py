@@ -1,178 +1,113 @@
+
 import streamlit as st
 import pandas as pd
 import requests
 import pydeck as pdk
+import plotly.express as px
 from datetime import datetime
 
-st.set_page_config(
-    page_title="Global Earthquake Dashboard",
-    page_icon="🌍",
-    layout="wide"
-)
+st.set_page_config(page_title="Earthquake Education Dashboard", layout="wide")
+st.title("🌍 Earthquake Education Dashboard")
+st.caption("USGS Earthquake Data + Scientific Insights")
 
-st.title("🌍 Global Earthquake Dashboard")
-st.caption("USGS Earthquake Data Visualization")
+REGIONS = {
+    "Global": None,
+    "Asia": {"lat": (5, 55), "lon": (60, 150)},
+    "North America": {"lat": (10, 75), "lon": (-170, -50)},
+    "South America": {"lat": (-60, 15), "lon": (-90, -30)},
+    "Europe": {"lat": (35, 70), "lon": (-10, 40)},
+    "Africa": {"lat": (-35, 38), "lon": (-20, 55)},
+    "Oceania": {"lat": (-50, 0), "lon": (110, 180)}
+}
 
-# =========================
-# Sidebar
-# =========================
-st.sidebar.header("Filters")
-
-year = st.sidebar.selectbox(
-    "Select Year",
-    list(range(2000, datetime.now().year + 1))[::-1]
-)
-
-min_mag = st.sidebar.slider(
-    "Minimum Magnitude",
-    min_value=1.0,
-    max_value=9.0,
-    value=4.5,
-    step=0.1
-)
-
-
-# =========================
-# Load Data
-# =========================
-@st.cache_data(show_spinner=False)
+@st.cache_data
 def load_data(year, min_mag):
     start = f"{year}-01-01"
     end = f"{year}-12-31"
-
-    url = (
-        "https://earthquake.usgs.gov/fdsnws/event/1/query"
-        f"?format=geojson"
-        f"&starttime={start}"
-        f"&endtime={end}"
-        f"&minmagnitude={min_mag}"
-        f"&limit=20000"
-    )
-
-    response = requests.get(url)
-    data = response.json()
-
+    url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start}&endtime={end}&minmagnitude={min_mag}&limit=5000"
+    r = requests.get(url, timeout=30)
+    data = r.json()
     rows = []
-
-    for feature in data["features"]:
-        props = feature["properties"]
-        coords = feature["geometry"]["coordinates"]
-
+    for f in data.get("features", []):
+        p = f["properties"]
+        c = f["geometry"]["coordinates"]
         rows.append({
-            "place": props["place"],
-            "mag": props["mag"],
-            "time": pd.to_datetime(props["time"], unit="ms"),
-            "lon": coords[0],
-            "lat": coords[1],
-            "depth": coords[2]
+            "place": p["place"],
+            "mag": p["mag"],
+            "time": pd.to_datetime(p["time"], unit="ms"),
+            "lon": c[0],
+            "lat": c[1],
+            "depth": c[2]
         })
-
     return pd.DataFrame(rows)
 
+def filter_region(df, region):
+    if region == "Global":
+        return df
+    b = REGIONS[region]
+    return df[(df.lat>=b["lat"][0])&(df.lat<=b["lat"][1])&(df.lon>=b["lon"][0])&(df.lon<=b["lon"][1])]
 
-with st.spinner("Loading earthquake data..."):
-    df = load_data(year, min_mag)
+year = st.sidebar.selectbox("Year", list(range(2000, datetime.now().year+1))[::-1])
+min_mag = st.sidebar.slider("Min Magnitude", 4.0, 9.0, 4.5, 0.1)
+region = st.sidebar.selectbox("Region", list(REGIONS.keys()))
 
+df = load_data(year, min_mag)
 if df.empty:
-    st.warning("No data found.")
+    st.warning("No data")
     st.stop()
 
+df = filter_region(df, region)
+if df.empty:
+    st.warning("No data after filter")
+    st.stop()
 
-# =========================
-# Data Processing
-# =========================
 df["month"] = df["time"].dt.month
 
-def extract_region(place):
-    if "," in place:
-        return place.split(",")[-1].strip()
-    return "Unknown"
+c1,c2,c3 = st.columns(3)
+c1.metric("Earthquakes", len(df))
+c2.metric("Max Magnitude", round(df.mag.max(),2))
+c3.metric("Avg Magnitude", round(df.mag.mean(),2))
 
-df["region"] = df["place"].apply(extract_region)
+st.subheader("🗺 Map")
+layer = pdk.Layer("ScatterplotLayer", data=df, get_position='[lon, lat]', get_radius='mag*12000', get_fill_color='[255,80,0,140]')
+st.pydeck_chart(pdk.Deck(layers=[layer], initial_view_state=pdk.ViewState(latitude=float(df.lat.mean()), longitude=float(df.lon.mean()), zoom=1.5)))
 
-def mag_color(m):
-    if m >= 7:
-        return [255, 0, 0]
-    elif m >= 6:
-        return [255, 140, 0]
-    elif m >= 5:
-        return [255, 215, 0]
-    return [0, 191, 255]
+col1,col2 = st.columns(2)
+with col1:
+    monthly = df.groupby("month").size().reset_index(name="count")
+    fig = px.line(monthly, x="month", y="count", title="Monthly Trend")
+    st.plotly_chart(fig, use_container_width=True)
 
-df["color"] = df["mag"].apply(mag_color)
+with col2:
+    fig = px.histogram(df, x="mag", nbins=20, title="Magnitude Distribution")
+    st.plotly_chart(fig, use_container_width=True)
 
+st.subheader("🧠 Educational Insights")
+st.markdown("""
+### Plate Tectonics
+Most earthquakes occur near tectonic plate boundaries.
 
-# =========================
-# KPI Cards
-# =========================
-col1, col2, col3, col4 = st.columns(4)
+### Depth Analysis
+- Shallow: 0–70 km  
+- Intermediate: 70–300 km  
+- Deep: 300+ km
+""")
 
-col1.metric("🌎 Total", f"{len(df):,}")
-col2.metric("⚡ Max Mag", round(df["mag"].max(), 2))
-col3.metric("📈 Avg Mag", round(df["mag"].mean(), 2))
-col4.metric("🌍 Regions", df["region"].nunique())
+depth_bins = pd.cut(df["depth"], bins=[0,70,300,1000], labels=["Shallow","Intermediate","Deep"])
+depth_df = depth_bins.value_counts().reset_index()
+depth_df.columns=["depth_type","count"]
+fig = px.bar(depth_df, x="depth_type", y="count", title="Depth Analysis")
+st.plotly_chart(fig, use_container_width=True)
 
+st.markdown("""
+### Magnitude vs Energy Release
+Each +1 magnitude ≈ 32x more energy.
+- M5 = 1x
+- M6 = 32x
+- M7 = 1,000x
+- M8 = 32,000x
+""")
 
-# =========================
-# Map
-# =========================
-st.subheader("🗺 Global Earthquake Map")
-
-layer = pdk.Layer(
-    "ScatterplotLayer",
-    data=df,
-    get_position='[lon, lat]',
-    get_fill_color='color',
-    get_radius='mag * 15000',
-    pickable=True,
-    opacity=0.5
-)
-
-view_state = pdk.ViewState(
-    latitude=0,
-    longitude=0,
-    zoom=1
-)
-
-deck = pdk.Deck(
-    layers=[layer],
-    initial_view_state=view_state,
-    tooltip={
-        "text": "Location: {place}\nMagnitude: {mag}\nDepth: {depth} km"
-    }
-)
-
-st.pydeck_chart(deck)
-
-
-# =========================
-# Charts
-# =========================
-left, right = st.columns(2)
-
-with left:
-    st.subheader("📊 Monthly Earthquake Count")
-    monthly = df.groupby("month").size()
-    st.line_chart(monthly)
-
-with right:
-    st.subheader("📈 Magnitude Distribution")
-    bins = pd.cut(df["mag"], bins=[0, 4, 5, 6, 7, 10])
-    mag_dist = bins.value_counts().sort_index()
-    st.bar_chart(mag_dist)
-
-
-# =========================
-# Region Stats
-# =========================
-st.subheader("🌎 Top 10 Most Active Regions")
-
-region_stats = df.groupby("region").size().sort_values(ascending=False).head(10)
-st.bar_chart(region_stats)
-
-
-# =========================
-# Raw Data
-# =========================
-with st.expander("Show Raw Data"):
-    st.dataframe(df, use_container_width=True)
+energy = pd.DataFrame({"Magnitude":["5","6","7","8"],"Energy":[1,32,1000,32000]})
+fig = px.bar(energy, x="Magnitude", y="Energy", title="Energy Release")
+st.plotly_chart(fig, use_container_width=True)
